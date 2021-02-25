@@ -1,0 +1,107 @@
+library(gotmtools)
+library(LakeEnsemblR)
+library(ggplot2)
+library(lubridate)
+library(plyr)
+
+
+setwd("C:\\Users\\mooret\\Desktop\\LER_examples\\Langtjern") # Change working directory to example folder
+model <- c('FLake', 'GLM', 'GOTM', 'Simstrat', 'MyLake')
+config_file <- 'LER_Langtjern_1hour_paper.yaml'
+
+# times
+start <- as.POSIXct("2014-05-24 00:00:00", tz = 'UTC')
+wup <- as.POSIXct("2015-05-24 00:00:00", tz = 'UTC')
+cal <- as.POSIXct("2016-06-24 00:00:00", tz = 'UTC')
+val <- as.POSIXct("2017-06-24 00:00:00", tz = 'UTC')
+
+# Set start & stop times
+input_yaml(config_file, "time", "start", "2014-05-24 00:00:00")
+input_yaml(config_file, "time", "stop", "2017-06-24 00:00:00")
+input_yaml(config_file, "light", "Kw", 2.25)
+
+# 1. Create directories with all model setup
+export_config(config_file = config_file, model = model)
+
+# 2. Run ensemble lake models
+run_ensemble(config_file = config_file,
+             model = model, parallel = F)
+
+# Extract names of all the variables in netCDF
+ncdf <- 'output/ensemble_output.nc'
+vars <- gotmtools::list_vars(ncdf)
+vars # Print variables
+p1 <- plot_heatmap(ncdf)
+p1
+
+# Calculate uncalibrated stats
+fit <- calc_fit(ncdf, model = model, var = "temp")
+fit2 <- data.table::rbindlist(fit, idcol = T)
+colnames(fit2)[1] <- 'model'
+fit2$status <- 'uncal'
+fit2 <- fit2[, c(2:4,6:7,5,8, 1)]
+fit2
+
+# Load ice data
+ice <- read.csv('ice_dates.txt')
+ice[,1] <- as.POSIXct(ice[,1], tz = "UTC")
+ice[,2] <- as.POSIXct(ice[,2], tz = "UTC")
+ice$on <- -(365 - yday(ice$ice_on)) # convert to negative
+ice$off <- yday(ice$ice_off)
+
+
+# Calibration
+input_yaml(config_file, "time", "start", "2014-05-24 00:00:00")
+input_yaml(config_file, "time", "stop", "2016-06-24 00:00:00")
+cal_fold <- 'calib_v6'
+config_file <- 'LER_Langtjern_1hour_paper.yaml'
+obs <- read.csv("LER_langtjern_wtemp_profile_1day_mean_2010-2018.csv")
+
+# 
+# export_config(config_file, model = 'MyLake')
+# cali_ensemble(config_file = config_file, model = 'MyLake',  num = 500, cmethod = "LHC",
+#               spin_up = 365, parallel = F, job_name = 'mylake', out_f = 'mylake_cal')
+
+qual_fun <- function(O, P){
+  
+  # remove datetime column
+  O <- as.matrix(O[, -1])
+  P <- as.matrix(P[, -1])
+  
+  # rmse
+  rmse <- sqrt(mean((O - P)^2, na.rm = TRUE))
+  
+  
+  # nash sutcliff
+  nse <- 1 - sum((O - P)^2, na.rm = TRUE)/sum((O - mean(O, na.rm=TRUE))^2, na.rm = TRUE)
+  
+  # pearson corelation coef
+  r <- sum((O - mean(O, na.rm = TRUE))*(P - mean(P, na.rm = TRUE)),
+           na.rm = TRUE)/sqrt(sum((O - mean(O, na.rm = TRUE))^2, na.rm = TRUE)*
+                                sum((P - mean(P, na.rm = TRUE))^2, na.rm = TRUE))
+  
+  # relative error
+  re <- mean((P - O)/O, na.rm = TRUE)
+  
+  # mean absolute error
+  mae <- mean(abs(O - P), na.rm = TRUE)
+  
+  # normalised mean absolute error
+  LL <- -2 * sum(dnorm(O, mean = P, sd = 0.75, log = TRUE), na.rm = TRUE)
+  
+  qual <- data.frame(rmse = rmse, nse = nse, r = r, re = re, mae = mae, LL = LL)
+  
+  return(qual)
+}
+
+par_fils <- list.files(cal_fold, pattern = "params")
+model <- c("GLM")
+par_fils <- grep(paste(model, collapse = "|"), par_fils, value = TRUE)
+
+
+cali_ensemble(config_file = config_file, model = model, 
+              num = 5000, cmethod = "LHC", param_file = file.path(cal_fold, par_fils[1]),
+              spin_up = 365, parallel = FALSE, 
+              # job_name = 'cali',
+              out_f = cal_fold, qualfun = qual_fun)
+

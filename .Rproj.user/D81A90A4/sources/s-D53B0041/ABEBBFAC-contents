@@ -1,0 +1,247 @@
+---
+title: "Probability and Likelihood"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+# PART 1
+
+### Step 0: Load dataset
+
+```{r}
+d <- read_csv(file = "https://data.ecoforecast.org/targets/phenology/phenology-targets.csv.gz")
+```
+
+Filter the dataset to only include the siteID BART and the dates between 2019-01-01 and 2019-07-01.  Convert the date to Day of Year (hint: use lubridate:: yday() function).  Remove rows with gcc_90 equal to NA or gcc_sd equal to 0.
+
+```{r}
+bart_2019 <- d  %>%
+  filter(siteID == "BART",
+         time > as_date("2019-01-01"),
+         time < as_date("2019-07-01")) %>%
+  mutate(doy = yday(time)) %>% 
+  filter(!is.na(gcc_90),
+         gcc_sd > 0)
+```
+
+### Step 1: Plot the data.  
+
+
+gcc = green chromatic coordinate
+
+**Question 1:** How is gcc_90 related to day of year?
+
+**Answer 1:**
+```{r}
+plot(bart_2019$doy, bart_2019$gcc_90)
+```
+
+**Question 2:**  Use a histogram to examine the distribution of the gcc_90
+
+**Answer 2:**
+```{r}
+hist(bart_2019$gcc_90)
+```
+
+
+**Question 3:** What probability distribution that best describes the data?
+
+**Answer 3:**
+Logistic
+
+### Step 3: Use maximum likelihood to model the data
+  
+First create a function called `pred.logistic' that is your process model.  The model is the 
+the logistic curve which is the equation
+$$\theta_1 + \theta_2 {{exp(\theta_3 + \theta_4 x)}\over{1+exp(\theta_3 + \theta_4 x)}}$$
+**Question 4:** Is this process model a dynamic model?  Why or why not?
+
+**Answer 4:**
+No, because it is not dependent on ts previous state.
+
+**Question 5:** Write a function that predicts the gcc_90 as a function of the parameters ($theta$) and doy in the equation above.  Name that function "pred.logistic"
+
+**Answer 5:**
+```{r}
+pred.logistic <- function(x, theta) {
+  theta[1] + theta[2] * ((exp(theta[3] + theta[4] * x)) / (1 + exp(theta[3] + theta[4] * x)))
+}
+
+pars <- c(0.34, 0.11, -15 ,0.11)
+x <- bart_2019$doy
+
+test <- pred.logistic(x, pars)
+plot(test)
+```
+
+**Question 6:** Write a function that calculates the negative log-likelihood of the data given a set of parameters governing the process and data models.  
+
+**Answer 6:**
+
+```{r}
+#Probability model
+LL_fn <- function(pars, x){
+    -sum(dnorm(bart_2019$gcc_90, mean = pred.logistic(x, pars), sd = pars[5], log = TRUE))
+}
+
+```
+
+
+**Question 7:** Use the `optim` function to find the most likely parameter values
+
+
+**Answer 7:**
+
+```{r}
+
+fit <- optim(par = c(0.34, 0.11, -15 ,0.11, 0.01), fn = LL_fn, x = bart_2019$doy, method = "BFGS")
+plot(bart_2019$doy, bart_2019$gcc_90)
+# lines(bart_2019$doy, pred.logistic(bart_2019$doy, theta = fit$par[1:4]))
+curve(pred.logistic(x, theta = fit$par[1:4]), from = 1, to = 190, add = TRUE)
+```
+
+**Question 8:** Use your optimal parameters in the `pred.logistic` function to predict the data.  Save this as the object `predicted`
+
+**Answer 8:**
+
+```{r}
+predicted <- pred.logistic(bart_2019$doy, fit$par)
+```
+
+**Question 9:**  Calculate the residuals and plot a histogram of the residuals
+
+**Answer 9:**
+
+```{r}
+bart_2019$resid <- bart_2019$gcc_90 - predicted
+hist(bart_2019$resid, breaks = 20)
+abline(v = 0)
+```
+
+**Question 10:** How does the distribution of the data (Question 2) compare to the distribution of the residuals?
+
+
+**Answer 10:**
+It is normally distributed
+
+
+**Question 11:** "Forecast" 2020 using the parameters from the 2019 fit.
+
+```{r}
+#Add Answer
+fcast <- pred.logistic(1:182, fit$par) 
+```
+
+**Answer 11:**
+
+**Question 12:** Plot the forecast from Question 10 over the data from 2020 (I give the code for getting the 2020 data)
+
+**Answer 12:**
+
+```{r}
+bart_2020 <- d  %>%
+  filter(siteID == "BART",
+         time > as_date("2020-01-01"),
+         time < as_date("2020-07-01")) %>%
+  mutate(doy = yday(time)) %>% 
+  filter(!is.na(gcc_90),
+         gcc_sd > 0)
+
+plot(bart_2020$doy, bart_2020$gcc_90)
+lines(1:182, fcast, col = "red")
+```
+
+**Question 13:** Do you think your model from 2019 is reasonable for predicting 2020?
+
+**Answer 13:**
+
+```{r}
+#Add Answer
+```
+
+# PART 2 (worth 7 points)
+
+Download the following data from Files/Exercises folder Canvas
+
+"soil_respiration_module_data.csv" 
+
+It is a dataset that reports soil respiration, soil temperature, and soil moisture over a year at the University of Michigan Biological Station (from Nave, L.E., N. Bader, and J.L. Klug)
+
+The columns correspond to the following
+
+doy = Day of Year
+soil_resp: Soil respiration (micromoles CO2 per m2 per second)
+soil_temp: Soil Temp (deg C)
+soil_moisture: Soil Moisture (%)
+
+Model the relationship between soil temperature and soil respiration using the Q10 function below
+
+
+$$\theta_1 * \theta_2 ^{{(T - 20)}\over{10}}$$
+
+Show all the steps to determine the most likely parameter values, report the parameter values, and plot the data and predictions on the same plot.
+
+
+Load in the data
+```{r}
+soil <- read.csv("soil_respiration_module_data.csv", fileEncoding = "UTF-8-BOM")
+summary(soil)
+```
+
+Plot the data
+
+```{r}
+
+plot(soil$doy, soil$soil_resp)
+hist(soil$soil_resp)
+```
+
+
+Function for respiration
+```{r}
+pred.resp <- function(temp, pars) {
+  pars[1] * (pars[2]^((temp - 20) / 10))
+}
+```
+
+Test the function
+```{r}
+pars <- c(5, 8)
+x <- soil$soil_temp
+
+test <- pred.resp(x, pars)
+plot(test, type = "l")
+```
+
+Likelihood function
+
+```{r}
+#Probability model
+LL_fn <- function(pars, x){
+    -sum(dnorm(soil$soil_resp, mean = pred.resp(x, pars), sd = pars[3] * pred.resp(x, pars), log = TRUE))
+}
+
+```
+
+
+Optimize the parameters and introduce par3 for sd
+```{r}
+fit <- optim(par = c(1, 10, 1), fn = LL_fn, x = soil$soil_temp, method = "BFGS")
+print(fit$par)
+```
+
+
+
+```{r}
+
+
+pred <- pred.resp(soil$soil_temp, fit$par)
+
+plot(soil$doy, soil$soil_resp)
+lines(soil$doy, pred, col = 2)
+```

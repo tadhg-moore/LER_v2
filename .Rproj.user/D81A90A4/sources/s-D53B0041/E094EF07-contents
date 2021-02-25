@@ -1,0 +1,29 @@
+setwd("feeagh")
+library(ggplot2)
+
+fla <- read.csv("cali/FLake_MCMC_202102232321.csv")
+fla$run <- 1:nrow(fla)
+fla$model <- "FLake"
+
+glm <- read.csv("cali/GLM_MCMC_202102232321.csv")
+glm$run <- 1:nrow(glm)
+# glm$model <- "GLM"
+
+res <- glm
+
+mlt <- reshape2::melt(res, id.vars = c("qual", "run"))
+
+ggplot(mlt) +
+  geom_point(aes(run, value)) +
+  facet_wrap(~variable, scales = "free_y") +
+  scale_y_log10()
+
+idx <- which(mlt$run > 200) # Burn in
+ggplot(mlt[idx, ]) +
+  geom_point(aes(value, qual)) +
+  # geom_line(aes(run, value)) +
+  geom_smooth(aes(value, qual)) +
+  facet_wrap(~variable, scales = "free_x") #+
+  scale_y_log10()
+
+  
